@@ -8,3 +8,6 @@ corosensei = "0.2.1"
 
 [features]
 tlv = []
+
+[dev-dependencies]
+futures-lite = "2.6.0"

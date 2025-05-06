@@ -72,10 +72,12 @@ impl<R: 'static> Coroutine<R> {
 
                     impl Drop for ContextGuard {
                         fn drop(&mut self) {
-                            let cx = CONTEXT.take().unwrap();
-                            #[cfg(feature = "tlv")]
-                            tlv::set(cx.old_tlv);
-                            unsafe { CONTEXT.set((*cx.old_cx).take()) };
+                            CONTEXT.with(|context| {
+                                let cx = context.take().unwrap();
+                                #[cfg(feature = "tlv")]
+                                tlv::set(cx.old_tlv);
+                                unsafe { context.set((*cx.old_cx).take()) };
+                            });
                         }
                     }
 
@@ -130,7 +132,10 @@ impl<F: IntoFuture> Stackify for F {
                     }
                     CONTEXT.with(|context| context.swap(Cell::from_mut(&mut *cx.old_cx)));
                 },
-                task::Poll::Ready(r) => return r,
+                task::Poll::Ready(r) => {
+                    CONTEXT.set(Some(cx));
+                    return r;
+                }
             }
         }
     }
