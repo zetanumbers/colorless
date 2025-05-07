@@ -160,5 +160,6 @@ impl<R: 'static> IntoFuture for SyncIntoCoroutine<R> {
     }
 }
 
+// SAFETY: coroutine is not yet run, so it couldn't have stored any `!Send` object yet
 unsafe impl<R: Send + 'static> Send for SyncIntoCoroutine<R> {}
 unsafe impl<R: 'static> Sync for SyncIntoCoroutine<R> {}

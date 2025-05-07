@@ -1,0 +1,13 @@
+[package]
+name = "colorless-executor"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+async-channel = "2.3.1"
+colorless = { path = ".." }
+crossbeam-utils = "0.8.21"
+futures-lite = "2.6.0"
+pin-project-lite = "0.2.16"
+unsend = "0.2.1"
+

@@ -1,3 +1,6 @@
+[workspace]
+members = [".", "executor"]
+
 [package]
 name = "colorless"
 version = "0.1.0"
