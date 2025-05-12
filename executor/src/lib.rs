@@ -18,11 +18,12 @@ use colorless::{SyncIntoCoroutine, sync_into_coroutine};
 pub use futures_lite::{self, future::block_on};
 
 pub type SyncFn = dyn Fn() + Send + Sync;
+pub type ThreadNameFn = dyn Fn(usize) -> String + Send + Sync;
 
 #[non_exhaustive]
 #[derive(Default)]
 pub struct ExecutorConfig {
-    pub thread_name: Option<String>,
+    pub thread_name: Option<Box<ThreadNameFn>>,
     pub acquire_thread_handler: Option<Box<SyncFn>>,
     pub release_thread_handler: Option<Box<SyncFn>>,
     pub num_threads: Option<NonZero<usize>>,
@@ -131,7 +132,7 @@ impl Executor {
             for i in 0..num_threads.get() {
                 let mut thread_builder = thread::Builder::new();
                 if let Some(thread_name) = &config.thread_name {
-                    thread_builder = thread_builder.name(format!("{thread_name}_{i}"))
+                    thread_builder = thread_builder.name(thread_name(i))
                 }
                 if let Some(stack_size) = &config.stack_size {
                     thread_builder = thread_builder.stack_size(stack_size.get())
