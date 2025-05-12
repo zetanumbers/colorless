@@ -70,11 +70,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "colorless_lock"
+name = "colorless-lock"
 version = "0.1.0"
 dependencies = [
  "async-lock",
  "colorless",
+ "colorless-executor",
  "event-listener",
 ]
 
