@@ -107,7 +107,11 @@ pub struct Executor {
 }
 
 impl Executor {
-    pub fn build_scoped<W, F, R>(config: ExecutorConfig, wrapper: W, with_pool: F) -> io::Result<R>
+    pub fn build_scoped<W, F, R>(
+        config: ExecutorConfig,
+        wrapper: W,
+        with_executor: F,
+    ) -> io::Result<R>
     where
         W: Fn(ThreadBuilder) + Sync,
         F: FnOnce(&Self) -> R,
@@ -153,7 +157,18 @@ impl Executor {
                     }
                 }
             }
-            Ok(with_pool(&executor))
+
+            struct CloseChannel<'a>(&'a async_channel::Receiver<SyncIntoCoroutine<()>>);
+
+            impl Drop for CloseChannel<'_> {
+                fn drop(&mut self) {
+                    self.0.close();
+                }
+            }
+
+            let _g = CloseChannel(&task_receiver);
+
+            Ok(with_executor(&executor))
         })
     }
 
@@ -208,6 +223,20 @@ pub fn mark_unblocked() {
             .expect("called `mark_unblocked` outside of a executor's worker thread")
             .as_ref()
             .mark_unblocked();
+    }
+}
+
+pub fn spawn<F, R>(f: F) -> Task<R>
+where
+    F: FnOnce() -> R + Send + 'static,
+    R: Send + 'static,
+{
+    unsafe {
+        EXECUTOR
+            .get()
+            .expect("called `spawn` outside of a executor's worker thread")
+            .as_ref()
+            .spawn(f)
     }
 }
 
