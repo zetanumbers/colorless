@@ -1,5 +1,5 @@
 use colorless::Stackify;
-use colorless_executor::{Executor, ExecutorConfig, block_on, spawn};
+use colorless_executor::{Executor, ExecutorConfig, block_on};
 use futures_lite::future::yield_now;
 
 #[test]
@@ -8,12 +8,10 @@ fn simple() {
         ExecutorConfig::default(),
         |tb| tb.run(),
         |exec| {
-            block_on(exec.spawn(|| {
-                let t1 = spawn(|| yield_now().await_());
-                let t2 = spawn(|| yield_now().await_());
-                t1.await_();
-                t2.await_();
-            }))
+            let t1 = exec.spawn(|| yield_now().await_().unwrap());
+            let t2 = exec.spawn(|| yield_now().await_().unwrap());
+            block_on(t1);
+            block_on(t2);
         },
     )
     .unwrap();

@@ -1,5 +1,6 @@
 use std::{
     cell::{Cell, UnsafeCell},
+    fmt,
     pin::{Pin, pin},
     task,
 };
@@ -102,16 +103,14 @@ impl<R: 'static> Future for Coroutine<R> {
 }
 
 pub trait Stackify: IntoFuture {
-    fn await_(self) -> Self::Output;
+    fn await_(self) -> Result<Self::Output, OutsideOfContextError>;
 }
 
 impl<F: IntoFuture> Stackify for F {
-    fn await_(self) -> Self::Output {
+    fn await_(self) -> Result<Self::Output, OutsideOfContextError> {
         let mut fut = pin!(self.into_future());
 
-        let Some(mut cx) = CONTEXT.take() else {
-            panic!("Outside of any await context");
-        };
+        let mut cx = CONTEXT.take().ok_or(OutsideOfContextError(()))?;
         #[cfg(feature = "tlv")]
         let context_tlv = tlv::get();
 
@@ -134,10 +133,26 @@ impl<F: IntoFuture> Stackify for F {
                 },
                 task::Poll::Ready(r) => {
                     CONTEXT.set(Some(cx));
-                    return r;
+                    return Ok(r);
                 }
             }
         }
+    }
+}
+
+pub fn inside_context() -> bool {
+    let cx = CONTEXT.take();
+    let check = cx.is_some();
+    CONTEXT.set(cx);
+    check
+}
+
+#[derive(Debug)]
+pub struct OutsideOfContextError(());
+
+impl fmt::Display for OutsideOfContextError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        "outside of any await context".fmt(f)
     }
 }
 

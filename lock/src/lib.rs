@@ -1,7 +1,7 @@
 use std::ops::{Deref, DerefMut};
 
-use colorless::Stackify;
-use event_listener::{Event, listener};
+use colorless::{Stackify, inside_context};
+use event_listener::{Event, Listener, listener};
 
 pub struct Mutex<T: ?Sized> {
     inner: async_lock::Mutex<T>,
@@ -37,7 +37,12 @@ impl<T> Mutex<T> {
 
 impl<T: ?Sized> Mutex<T> {
     pub fn lock(&self) -> MutexGuard<'_, T> {
-        MutexGuard(self.inner.lock().await_())
+        MutexGuard(
+            self.inner
+                .lock()
+                .await_()
+                .unwrap_or_else(|_| self.inner.lock_blocking()),
+        )
     }
 
     pub fn get_mut(&mut self) -> &mut T {
@@ -68,8 +73,13 @@ impl Condvar {
         listener!(&self.0 => listener);
         let mutex = async_lock::MutexGuard::source(&mutex_guard.0);
         drop(mutex_guard);
-        listener.await_();
-        MutexGuard(async_lock::Mutex::lock(mutex).await_())
+        if inside_context() {
+            listener.await_().unwrap();
+            MutexGuard(mutex.lock().await_().unwrap())
+        } else {
+            listener.wait();
+            MutexGuard(mutex.lock_blocking())
+        }
     }
 }
 
@@ -91,7 +101,12 @@ impl<T> RwLock<T> {
 
 impl<T: ?Sized> RwLock<T> {
     pub fn read(&self) -> RwLockReadGuard<'_, T> {
-        RwLockReadGuard(self.inner.read().await_())
+        RwLockReadGuard(
+            self.inner
+                .read()
+                .await_()
+                .unwrap_or_else(|_| self.inner.read_blocking()),
+        )
     }
 
     pub fn try_read(&self) -> Option<RwLockReadGuard<'_, T>> {
@@ -99,7 +114,12 @@ impl<T: ?Sized> RwLock<T> {
     }
 
     pub fn write(&self) -> RwLockWriteGuard<'_, T> {
-        RwLockWriteGuard(self.inner.write().await_())
+        RwLockWriteGuard(
+            self.inner
+                .write()
+                .await_()
+                .unwrap_or_else(|_| self.inner.write_blocking()),
+        )
     }
 
     pub fn try_write(&self) -> Option<RwLockWriteGuard<'_, T>> {
