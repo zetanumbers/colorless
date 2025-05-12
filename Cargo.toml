@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "executor"]
+members = [".", "executor", "lock"]
 
 [package]
 name = "colorless"

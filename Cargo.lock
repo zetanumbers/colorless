@@ -15,6 +15,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-lock"
+version = "3.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ff6e472cdea888a4bd64f342f09b3f50e1886d32afe8df3d663c01140b811b18"
+dependencies = [
+ "event-listener",
+ "event-listener-strategy",
+ "pin-project-lite",
+]
+
+[[package]]
 name = "async-task"
 version = "4.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -56,6 +67,15 @@ dependencies = [
  "futures-lite 2.6.0",
  "pin-project-lite",
  "unsend",
+]
+
+[[package]]
+name = "colorless_lock"
+version = "0.1.0"
+dependencies = [
+ "async-lock",
+ "colorless",
+ "event-listener",
 ]
 
 [[package]]

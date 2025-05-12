@@ -1,0 +1,9 @@
+[package]
+name = "colorless_lock"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+async-lock = "3.4.0"
+colorless = { version = "0.1.0", path = ".." }
+event-listener = "5.4.0"
