@@ -3,6 +3,7 @@ use std::ops::{Deref, DerefMut};
 use colorless::{Stackify, inside_context};
 use event_listener::{Event, Listener, listener};
 
+#[derive(Default)]
 pub struct Mutex<T: ?Sized> {
     inner: async_lock::Mutex<T>,
 }
@@ -54,6 +55,7 @@ impl<T: ?Sized> Mutex<T> {
     }
 }
 
+#[derive(Default)]
 pub struct Condvar(Event);
 
 impl Condvar {
@@ -83,6 +85,7 @@ impl Condvar {
     }
 }
 
+#[derive(Default)]
 pub struct RwLock<T: ?Sized> {
     inner: async_lock::RwLock<T>,
 }
