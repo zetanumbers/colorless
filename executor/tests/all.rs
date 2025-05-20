@@ -1,3 +1,5 @@
+use std::thread::available_parallelism;
+
 use colorless::Stackify;
 use colorless_executor::{Executor, ExecutorConfig, block_on};
 use futures_lite::{StreamExt, future::yield_now};
@@ -24,7 +26,8 @@ fn broadcast() {
         |tb| tb.run(),
         |exec| {
             let bt = exec.broadcast(|| |_| yield_now().await_().unwrap());
-            block_on(bt.collect::<Vec<_>>());
+            let finished = block_on(bt.count());
+            assert_eq!(finished, available_parallelism().unwrap().get());
         },
     )
     .unwrap();

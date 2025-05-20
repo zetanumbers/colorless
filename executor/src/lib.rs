@@ -278,6 +278,21 @@ where
     }
 }
 
+pub fn broadcast<F, G, R>(g: G) -> BroadcastTask<R>
+where
+    G: FnMut() -> F,
+    F: Fn(usize) -> R + Send + 'static,
+    R: Send + 'static,
+{
+    unsafe {
+        EXECUTOR
+            .get()
+            .expect("called `broadcast` outside of a executor's worker thread")
+            .as_ref()
+            .broadcast(g)
+    }
+}
+
 thread_local! {
     static EXECUTOR: Cell<Option<ptr::NonNull<Executor>>> = const { Cell::new(None) };
 }
