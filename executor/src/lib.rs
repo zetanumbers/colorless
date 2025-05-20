@@ -10,7 +10,7 @@ use std::{
 };
 
 use crossbeam_utils::CachePadded;
-use futures_lite::Stream;
+use futures_lite::{FutureExt, Stream};
 use pin_project_lite::pin_project;
 
 use colorless::{SyncIntoCoroutine, sync_into_coroutine};
@@ -45,6 +45,7 @@ impl ExecutorConfig {
 }
 
 pub struct ThreadBuilder<'a> {
+    broadcast_task_receiver: async_channel::Receiver<SyncIntoCoroutine<()>>,
     task_receiver: async_channel::Receiver<SyncIntoCoroutine<()>>,
     acquire_thread_handler: Option<&'a SyncFn>,
     release_thread_handler: Option<&'a SyncFn>,
@@ -89,14 +90,24 @@ impl ThreadBuilder<'_> {
         block_on(WorkerFuture {
             acquire_thread_handler: self.acquire_thread_handler,
             release_thread_handler: self.release_thread_handler,
-            inner: ex.run(async {
-                loop {
-                    let Ok(task) = self.task_receiver.recv().await else {
-                        return;
-                    };
-                    ex.spawn(task.into_future()).detach();
+            inner: ex.run(
+                async {
+                    loop {
+                        let Ok(task) = self.task_receiver.recv().await else {
+                            return;
+                        };
+                        ex.spawn(task.into_future()).detach();
+                    }
                 }
-            }),
+                .or(async {
+                    loop {
+                        let Ok(task) = self.broadcast_task_receiver.recv().await else {
+                            return;
+                        };
+                        ex.spawn(task.into_future()).detach();
+                    }
+                }),
+            ),
         })
     }
 }
@@ -105,6 +116,7 @@ pub struct Executor {
     unblocked_worker_count: CachePadded<AtomicUsize>,
     task_sender: async_channel::Sender<SyncIntoCoroutine<()>>,
     deadlock_handler: Option<Box<SyncFn>>,
+    broadcast_senders: Vec<async_channel::Sender<SyncIntoCoroutine<()>>>,
 }
 
 impl Executor {
@@ -115,21 +127,26 @@ impl Executor {
     ) -> io::Result<R>
     where
         W: Fn(ThreadBuilder) + Sync,
-        F: FnOnce(&Self) -> R,
+        F: FnOnce(&Executor) -> R,
     {
         let num_threads = config
             .num_threads
             .map_or_else(thread::available_parallelism, Ok)?;
         let (task_sender, task_receiver) = async_channel::unbounded();
+        let (broadcast_senders, broadcast_receivers): (Vec<_>, Vec<_>) = (0..num_threads.get())
+            .map(|_| async_channel::unbounded())
+            .collect();
         let executor = Executor {
             task_sender,
             unblocked_worker_count: CachePadded::new(AtomicUsize::new(num_threads.get())),
             deadlock_handler: config.deadlock_handler,
+            broadcast_senders,
         };
 
         thread::scope(|scope| {
             let mut workers = Vec::with_capacity(num_threads.get());
-            for i in 0..num_threads.get() {
+
+            for (i, broadcast_task_receiver) in broadcast_receivers.into_iter().enumerate() {
                 let mut thread_builder = thread::Builder::new();
                 if let Some(thread_name) = &config.thread_name {
                     thread_builder = thread_builder.name(thread_name(i))
@@ -139,6 +156,7 @@ impl Executor {
                 }
                 let res = thread_builder.spawn_scoped(scope, || {
                     let worker_builder = ThreadBuilder {
+                        broadcast_task_receiver,
                         task_receiver: task_receiver.clone(),
                         acquire_thread_handler: config.acquire_thread_handler.as_deref(),
                         release_thread_handler: config.release_thread_handler.as_deref(),
@@ -185,6 +203,25 @@ impl Executor {
             }))
             .unwrap();
         Task { result_receiver }
+    }
+
+    pub fn broadcast<F, G, R>(&self, mut g: G) -> BroadcastTask<R>
+    where
+        G: FnMut() -> F,
+        F: Fn(usize) -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        let (result_sender, result_receiver) = async_channel::bounded(self.broadcast_senders.len());
+        for (i, broadcast_task_sender) in self.broadcast_senders.iter().enumerate() {
+            let result_sender = result_sender.clone();
+            let f = g();
+            broadcast_task_sender
+                .try_send(sync_into_coroutine(move || {
+                    result_sender.try_send((i, f(i))).unwrap()
+                }))
+                .unwrap();
+        }
+        BroadcastTask { result_receiver }
     }
 
     fn mark_unblocked(&self) {
@@ -260,5 +297,23 @@ impl<R> Future for Task<R> {
             .result_receiver
             .poll_next(cx)
             .map(|r| r.expect("task has panicked"))
+    }
+}
+
+pin_project! {
+    pub struct BroadcastTask<R> {
+        #[pin]
+        result_receiver: async_channel::Receiver<(usize, R)>,
+    }
+}
+
+impl<R> Stream for BroadcastTask<R> {
+    type Item = (usize, R);
+
+    fn poll_next(
+        self: Pin<&mut Self>,
+        cx: &mut task::Context<'_>,
+    ) -> task::Poll<Option<Self::Item>> {
+        self.project().result_receiver.poll_next(cx)
     }
 }
