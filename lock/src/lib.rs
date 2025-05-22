@@ -1,4 +1,7 @@
-use std::ops::{Deref, DerefMut};
+use std::{
+    fmt,
+    ops::{Deref, DerefMut},
+};
 
 use colorless::{Stackify, inside_context};
 use event_listener::{Event, Listener, listener};
@@ -55,6 +58,26 @@ impl<T: ?Sized> Mutex<T> {
     }
 }
 
+impl<T: ?Sized + fmt::Debug> fmt::Debug for Mutex<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.try_lock() {
+            Some(guard) => f.debug_struct("Mutex").field("data", &&*guard).finish(),
+            None => {
+                struct LockedPlaceholder;
+                impl fmt::Debug for LockedPlaceholder {
+                    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                        f.write_str("<locked>")
+                    }
+                }
+
+                f.debug_struct("Mutex")
+                    .field("data", &LockedPlaceholder)
+                    .finish()
+            }
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct Condvar(Event);
 
@@ -82,6 +105,12 @@ impl Condvar {
             listener.wait();
             MutexGuard(mutex.lock_blocking())
         }
+    }
+}
+
+impl fmt::Debug for Condvar {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.pad("Condvar { .. }")
     }
 }
 
@@ -157,5 +186,19 @@ impl<'a, T: ?Sized> Deref for RwLockWriteGuard<'a, T> {
 impl<'a, T: ?Sized> DerefMut for RwLockWriteGuard<'a, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
+    }
+}
+
+impl<T: ?Sized + fmt::Debug> fmt::Debug for RwLock<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut d = f.debug_struct("RwLock");
+        match self.try_read() {
+            Some(guard) => d.field("data", &&*guard),
+            None => {
+                // Additional format_args! here is to remove quotes around <locked> in debug output.
+                d.field("data", &format_args!("<locked>"))
+            }
+        };
+        d.finish()
     }
 }
