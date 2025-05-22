@@ -25,7 +25,7 @@ fn broadcast() {
         ExecutorConfig::default(),
         |tb| tb.run(),
         |exec| {
-            let bt = exec.broadcast(|| |_| yield_now().await_().unwrap());
+            let bt = exec.broadcast(|| || yield_now().await_().unwrap());
             let finished = block_on(bt.count());
             assert_eq!(finished, available_parallelism().unwrap().get());
         },

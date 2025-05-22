@@ -212,7 +212,7 @@ impl Executor {
     pub fn broadcast<F, G, R>(&self, mut g: G) -> BroadcastTask<R>
     where
         G: FnMut() -> F,
-        F: Fn(usize) -> R + Send + 'static,
+        F: Fn() -> R + Send + 'static,
         R: Send + 'static,
     {
         let (result_sender, result_receiver) = async_channel::bounded(self.num_threads());
@@ -221,7 +221,7 @@ impl Executor {
             let f = g();
             broadcast_task_sender
                 .try_send(sync_into_coroutine(move || {
-                    result_sender.try_send((i, f(i))).unwrap()
+                    result_sender.try_send((i, f())).unwrap()
                 }))
                 .unwrap();
         }
@@ -295,7 +295,7 @@ pub fn num_threads() -> usize {
 pub fn broadcast<F, G, R>(g: G) -> BroadcastTask<R>
 where
     G: FnMut() -> F,
-    F: Fn(usize) -> R + Send + 'static,
+    F: Fn() -> R + Send + 'static,
     R: Send + 'static,
 {
     unsafe {
