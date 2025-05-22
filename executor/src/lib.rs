@@ -205,13 +205,17 @@ impl Executor {
         Task { result_receiver }
     }
 
+    pub fn num_threads(&self) -> usize {
+        self.broadcast_senders.len()
+    }
+
     pub fn broadcast<F, G, R>(&self, mut g: G) -> BroadcastTask<R>
     where
         G: FnMut() -> F,
         F: Fn(usize) -> R + Send + 'static,
         R: Send + 'static,
     {
-        let (result_sender, result_receiver) = async_channel::bounded(self.broadcast_senders.len());
+        let (result_sender, result_receiver) = async_channel::bounded(self.num_threads());
         for (i, broadcast_task_sender) in self.broadcast_senders.iter().enumerate() {
             let result_sender = result_sender.clone();
             let f = g();
@@ -275,6 +279,16 @@ where
             .expect("called `spawn` outside of a executor's worker thread")
             .as_ref()
             .spawn(f)
+    }
+}
+
+pub fn num_threads() -> usize {
+    unsafe {
+        EXECUTOR
+            .get()
+            .expect("called `num_threads` outside of a executor's worker thread")
+            .as_ref()
+            .num_threads()
     }
 }
 
