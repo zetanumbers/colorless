@@ -207,7 +207,12 @@ impl Executor {
         R: Send + 'static,
     {
         let (result_sender, result_receiver) = async_channel::bounded(1);
-        let f = move || result_sender.try_send(f()).unwrap();
+        let f = move || {
+            let res = result_sender.try_send(f());
+            if let Err(async_channel::TrySendError::Full(_)) = res {
+                unreachable!()
+            }
+        };
         self.task_sender
             .try_send(if let Some(stack_size) = self.stack_size {
                 sync_into_coroutine_with_stack_size(stack_size.get(), f)
@@ -233,7 +238,12 @@ impl Executor {
         for (i, broadcast_task_sender) in self.broadcast_senders.iter().enumerate() {
             let result_sender = result_sender.clone();
             let f = g();
-            let f = move || result_sender.try_send((i, f())).unwrap();
+            let f = move || {
+                let res = result_sender.try_send((i, f()));
+                if let Err(async_channel::TrySendError::Full(_)) = res {
+                    unreachable!()
+                }
+            };
             broadcast_task_sender
                 .try_send(if let Some(stack_size) = self.stack_size {
                     sync_into_coroutine_with_stack_size(stack_size.get(), f)
