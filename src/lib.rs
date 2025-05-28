@@ -1,11 +1,12 @@
 use std::{
     cell::{Cell, UnsafeCell},
-    fmt,
+    fmt, io,
     pin::{Pin, pin},
     task,
 };
 
-use corosensei::CoroutineResult;
+use corosensei::{CoroutineResult, stack::DefaultStack};
+
 #[cfg(feature = "tlv")]
 use tlv::Tlv;
 
@@ -48,10 +49,26 @@ impl<R: 'static> Coroutine<R> {
         F: FnOnce() -> R + 'static,
         R: 'static,
     {
+        Self::with_stack(DefaultStack::default(), f)
+    }
+
+    pub fn with_stack_size<F>(size: usize, f: F) -> io::Result<Self>
+    where
+        F: FnOnce() -> R + 'static,
+        R: 'static,
+    {
+        Ok(Self::with_stack(DefaultStack::new(size)?, f))
+    }
+
+    fn with_stack<F>(stack: DefaultStack, f: F) -> Self
+    where
+        F: FnOnce() -> R + 'static,
+        R: 'static,
+    {
         #[cfg(feature = "tlv")]
         let tlv = tlv::get();
         Coroutine {
-            inner: corosensei::Coroutine::new(move |inner, context| {
+            inner: corosensei::Coroutine::with_stack(stack, move |inner, context| {
                 #[cfg(feature = "tlv")]
                 let old_tlv = tlv::get();
                 let old_cx = UnsafeCell::new(None);
@@ -162,6 +179,17 @@ where
     R: Send + 'static,
 {
     SyncIntoCoroutine(Coroutine::new(f))
+}
+
+pub fn sync_into_coroutine_with_stack_size<F, R>(
+    size: usize,
+    f: F,
+) -> io::Result<SyncIntoCoroutine<R>>
+where
+    F: FnOnce() -> R + Send + 'static,
+    R: Send + 'static,
+{
+    Ok(SyncIntoCoroutine(Coroutine::with_stack_size(size, f)?))
 }
 
 pub struct SyncIntoCoroutine<R: 'static>(Coroutine<R>);

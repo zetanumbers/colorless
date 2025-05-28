@@ -13,7 +13,7 @@ use crossbeam_utils::CachePadded;
 use futures_lite::{FutureExt, Stream};
 use pin_project_lite::pin_project;
 
-use colorless::{SyncIntoCoroutine, sync_into_coroutine};
+use colorless::{SyncIntoCoroutine, sync_into_coroutine, sync_into_coroutine_with_stack_size};
 
 pub use futures_lite::{self, future::block_on};
 
@@ -117,6 +117,7 @@ pub struct Executor {
     task_sender: async_channel::Sender<SyncIntoCoroutine<()>>,
     deadlock_handler: Option<Box<SyncFn>>,
     broadcast_senders: Vec<async_channel::Sender<SyncIntoCoroutine<()>>>,
+    stack_size: Option<NonZero<usize>>,
 }
 
 impl Executor {
@@ -141,6 +142,7 @@ impl Executor {
             unblocked_worker_count: CachePadded::new(AtomicUsize::new(num_threads.get())),
             deadlock_handler: config.deadlock_handler,
             broadcast_senders,
+            stack_size: config.stack_size,
         };
 
         thread::scope(|scope| {
@@ -197,10 +199,14 @@ impl Executor {
         R: Send + 'static,
     {
         let (result_sender, result_receiver) = async_channel::bounded(1);
+        let f = move || result_sender.try_send(f()).unwrap();
         self.task_sender
-            .try_send(sync_into_coroutine(move || {
-                result_sender.try_send(f()).unwrap()
-            }))
+            .try_send(if let Some(stack_size) = self.stack_size {
+                sync_into_coroutine_with_stack_size(stack_size.get(), f)
+                    .expect("unable to create a fresh coroutine for a task")
+            } else {
+                sync_into_coroutine(f)
+            })
             .unwrap();
         Task { result_receiver }
     }
@@ -219,10 +225,14 @@ impl Executor {
         for (i, broadcast_task_sender) in self.broadcast_senders.iter().enumerate() {
             let result_sender = result_sender.clone();
             let f = g();
+            let f = move || result_sender.try_send((i, f())).unwrap();
             broadcast_task_sender
-                .try_send(sync_into_coroutine(move || {
-                    result_sender.try_send((i, f())).unwrap()
-                }))
+                .try_send(if let Some(stack_size) = self.stack_size {
+                    sync_into_coroutine_with_stack_size(stack_size.get(), f)
+                        .expect("unable to create a fresh coroutine for a broadcast task")
+                } else {
+                    sync_into_coroutine(f)
+                })
                 .unwrap();
         }
         BroadcastTask { result_receiver }
