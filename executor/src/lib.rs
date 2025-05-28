@@ -47,8 +47,6 @@ impl ExecutorConfig {
 pub struct ThreadBuilder<'a> {
     broadcast_task_receiver: async_channel::Receiver<SyncIntoCoroutine<()>>,
     task_receiver: async_channel::Receiver<SyncIntoCoroutine<()>>,
-    acquire_thread_handler: Option<&'a SyncFn>,
-    release_thread_handler: Option<&'a SyncFn>,
     executor: &'a Executor,
     unsend: PhantomData<*mut ()>,
 }
@@ -96,8 +94,8 @@ impl ThreadBuilder<'_> {
         }
 
         block_on(WorkerFuture {
-            acquire_thread_handler: self.acquire_thread_handler,
-            release_thread_handler: self.release_thread_handler,
+            acquire_thread_handler: self.executor.acquire_thread_handler.as_deref(),
+            release_thread_handler: self.executor.release_thread_handler.as_deref(),
             inner: ex.run(
                 async {
                     loop {
@@ -126,6 +124,8 @@ pub struct Executor {
     deadlock_handler: Option<Box<SyncFn>>,
     broadcast_senders: Vec<async_channel::Sender<SyncIntoCoroutine<()>>>,
     stack_size: Option<NonZero<usize>>,
+    acquire_thread_handler: Option<Box<SyncFn>>,
+    release_thread_handler: Option<Box<SyncFn>>,
 }
 
 impl Executor {
@@ -151,6 +151,8 @@ impl Executor {
             deadlock_handler: config.deadlock_handler,
             broadcast_senders,
             stack_size: config.stack_size,
+            acquire_thread_handler: config.acquire_thread_handler,
+            release_thread_handler: config.release_thread_handler,
         };
 
         thread::scope(|scope| {
@@ -168,8 +170,6 @@ impl Executor {
                     let worker_builder = ThreadBuilder {
                         broadcast_task_receiver,
                         task_receiver: task_receiver.clone(),
-                        acquire_thread_handler: config.acquire_thread_handler.as_deref(),
-                        release_thread_handler: config.release_thread_handler.as_deref(),
                         executor: &executor,
                         unsend: PhantomData,
                     };
