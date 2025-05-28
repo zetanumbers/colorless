@@ -135,7 +135,7 @@ impl Executor {
         with_executor: F,
     ) -> io::Result<R>
     where
-        W: Fn(ThreadBuilder) + Sync,
+        W: Fn(ThreadBuilder<'_>) + Sync,
         F: FnOnce(&Executor) -> R,
     {
         let num_threads = config
