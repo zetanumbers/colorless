@@ -78,12 +78,20 @@ impl ThreadBuilder<'_> {
                 if let Some(acquire_thread) = *project.acquire_thread_handler {
                     acquire_thread()
                 }
-                let out = project.inner.poll(cx);
-                if let Some(release_thread) = *project.release_thread_handler {
-                    release_thread()
+
+                struct ReleaseThreadGuard<'a>(Option<&'a SyncFn>);
+
+                impl Drop for ReleaseThreadGuard<'_> {
+                    fn drop(&mut self) {
+                        if let Some(release_thread) = self.0 {
+                            release_thread()
+                        }
+                    }
                 }
 
-                out
+                let _guard = ReleaseThreadGuard(*project.release_thread_handler);
+
+                project.inner.poll(cx)
             }
         }
 
