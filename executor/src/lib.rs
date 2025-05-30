@@ -1,9 +1,9 @@
 use std::{
-    cell::Cell,
-    io,
+    cell::{Cell, RefCell},
+    future, io,
     marker::PhantomData,
     num::NonZero,
-    pin::Pin,
+    pin::{Pin, pin},
     ptr,
     sync::atomic::{self, AtomicUsize},
     task, thread,
@@ -13,12 +13,13 @@ use crossbeam_utils::CachePadded;
 use futures_lite::{FutureExt, Stream};
 use pin_project_lite::pin_project;
 
-use colorless::{SyncIntoCoroutine, sync_into_coroutine, sync_into_coroutine_with_stack_size};
+use colorless::{Coroutine, SyncIntoCoroutine, stack::DefaultStack};
 
 pub use futures_lite::{self, future::block_on};
 
 pub type SyncFn = dyn Fn() + Send + Sync;
 pub type ThreadNameFn = dyn Fn(usize) -> String + Send + Sync;
+pub type TaskFn = dyn FnOnce() + Send;
 
 #[non_exhaustive]
 #[derive(Default)]
@@ -45,8 +46,8 @@ impl ExecutorConfig {
 }
 
 pub struct ThreadBuilder<'a> {
-    broadcast_task_receiver: async_channel::Receiver<SyncIntoCoroutine<()>>,
-    task_receiver: async_channel::Receiver<SyncIntoCoroutine<()>>,
+    broadcast_task_receiver: async_channel::Receiver<Box<TaskFn>>,
+    task_receiver: async_channel::Receiver<Box<TaskFn>>,
     executor: &'a Executor,
     unsend: PhantomData<*mut ()>,
 }
@@ -58,6 +59,7 @@ impl ThreadBuilder<'_> {
         }));
 
         let ex = unsend::executor::Executor::new();
+        let stacks = RefCell::new(Vec::with_capacity(8));
 
         pin_project! {
             struct WorkerFuture<'a, F> {
@@ -93,6 +95,32 @@ impl ThreadBuilder<'_> {
             }
         }
 
+        let spawn = |task: Box<TaskFn>| {
+            let stack =
+                stacks
+                    .borrow_mut()
+                    .pop()
+                    .unwrap_or_else(|| match self.executor.stack_size {
+                        Some(size) => {
+                            DefaultStack::new(size.get()).expect("failed to allocate stack")
+                        }
+                        None => DefaultStack::default(),
+                    });
+            let mut coroutine = Some(Coroutine::with_stack(stack, || task()));
+            ex.spawn(future::poll_fn(|cx| {
+                match Pin::new(coroutine.as_mut().expect("future poll after its finish")).poll(cx) {
+                    task::Poll::Ready(()) => {
+                        stacks
+                            .borrow_mut()
+                            .push(coroutine.take().unwrap().into_stack());
+                        task::Poll::Ready(())
+                    }
+                    task::Poll::Pending => task::Poll::Pending,
+                }
+            }))
+            .detach();
+        };
+
         block_on(WorkerFuture {
             acquire_thread_handler: self.executor.acquire_thread_handler.as_deref(),
             release_thread_handler: self.executor.release_thread_handler.as_deref(),
@@ -102,7 +130,7 @@ impl ThreadBuilder<'_> {
                         let Ok(task) = self.task_receiver.recv().await else {
                             return;
                         };
-                        ex.spawn(task.into_future()).detach();
+                        spawn(task)
                     }
                 }
                 .or(async {
@@ -110,7 +138,7 @@ impl ThreadBuilder<'_> {
                         let Ok(task) = self.broadcast_task_receiver.recv().await else {
                             return;
                         };
-                        ex.spawn(task.into_future()).detach();
+                        spawn(task)
                     }
                 }),
             ),
