@@ -55,6 +55,7 @@ version = "0.1.0"
 dependencies = [
  "corosensei",
  "futures-lite 2.6.0",
+ "pin-project-lite",
 ]
 
 [[package]]

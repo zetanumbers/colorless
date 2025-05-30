@@ -1,12 +1,15 @@
 use std::{
     cell::{Cell, UnsafeCell},
-    fmt, io,
+    fmt,
     pin::{Pin, pin},
     task,
 };
 
 use corosensei::{CoroutineResult, stack::DefaultStack};
 
+pub use corosensei::stack;
+
+use pin_project_lite::pin_project;
 #[cfg(feature = "tlv")]
 use tlv::Tlv;
 
@@ -39,8 +42,14 @@ thread_local! {
     static CONTEXT: Cell<Option<Yielder>> = const { Cell::new(None) };
 }
 
-pub struct Coroutine<R: 'static> {
-    inner: corosensei::Coroutine<TaskContext, (), R>,
+pin_project! {
+    pub struct Coroutine<R, Stack = stack::DefaultStack>
+    where
+        R: 'static,
+        Stack: stack::Stack,
+    {
+        inner: corosensei::Coroutine<TaskContext, (), R, Stack>,
+    }
 }
 
 impl<R: 'static> Coroutine<R> {
@@ -51,16 +60,10 @@ impl<R: 'static> Coroutine<R> {
     {
         Self::with_stack(DefaultStack::default(), f)
     }
+}
 
-    pub fn with_stack_size<F>(size: usize, f: F) -> io::Result<Self>
-    where
-        F: FnOnce() -> R + 'static,
-        R: 'static,
-    {
-        Ok(Self::with_stack(DefaultStack::new(size)?, f))
-    }
-
-    fn with_stack<F>(stack: DefaultStack, f: F) -> Self
+impl<R: 'static, Stack: stack::Stack> Coroutine<R, Stack> {
+    pub fn with_stack<F>(stack: Stack, f: F) -> Self
     where
         F: FnOnce() -> R + 'static,
         R: 'static,
@@ -105,13 +108,17 @@ impl<R: 'static> Coroutine<R> {
             }),
         }
     }
+
+    pub fn into_stack(self) -> Stack {
+        self.inner.into_stack()
+    }
 }
 
-impl<R: 'static> Future for Coroutine<R> {
+impl<R: 'static, Stack: stack::Stack> Future for Coroutine<R, Stack> {
     type Output = R;
 
     fn poll(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> task::Poll<R> {
-        let res = self.get_mut().inner.resume(TaskContext::new(cx));
+        let res = self.project().inner.resume(TaskContext::new(cx));
         match res {
             CoroutineResult::Yield(()) => task::Poll::Pending,
             CoroutineResult::Return(r) => task::Poll::Ready(r),
@@ -181,22 +188,26 @@ where
     SyncIntoCoroutine(Coroutine::new(f))
 }
 
-pub fn sync_into_coroutine_with_stack_size<F, R>(
-    size: usize,
+pub fn sync_into_coroutine_with_stack<F, R, Stack>(
+    stack: Stack,
     f: F,
-) -> io::Result<SyncIntoCoroutine<R>>
+) -> SyncIntoCoroutine<R, Stack>
 where
     F: FnOnce() -> R + Send + 'static,
     R: Send + 'static,
+    Stack: stack::Stack,
 {
-    Ok(SyncIntoCoroutine(Coroutine::with_stack_size(size, f)?))
+    SyncIntoCoroutine(Coroutine::with_stack(stack, f))
 }
 
-pub struct SyncIntoCoroutine<R: 'static>(Coroutine<R>);
+pub struct SyncIntoCoroutine<R, Stack = stack::DefaultStack>(Coroutine<R, Stack>)
+where
+    R: 'static,
+    Stack: stack::Stack;
 
-impl<R: 'static> IntoFuture for SyncIntoCoroutine<R> {
+impl<R: 'static, Stack: stack::Stack> IntoFuture for SyncIntoCoroutine<R, Stack> {
     type Output = R;
-    type IntoFuture = Coroutine<R>;
+    type IntoFuture = Coroutine<R, Stack>;
 
     fn into_future(self) -> Self::IntoFuture {
         self.0
