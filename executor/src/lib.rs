@@ -3,7 +3,7 @@ use std::{
     future, io,
     marker::PhantomData,
     num::NonZero,
-    pin::{Pin, pin},
+    pin::Pin,
     ptr,
     sync::atomic::{self, AtomicUsize},
     task, thread,
@@ -13,7 +13,7 @@ use crossbeam_utils::CachePadded;
 use futures_lite::{FutureExt, Stream};
 use pin_project_lite::pin_project;
 
-use colorless::{Coroutine, SyncIntoCoroutine, stack::DefaultStack};
+use colorless::{Coroutine, stack::DefaultStack};
 
 pub use futures_lite::{self, future::block_on};
 
@@ -106,7 +106,7 @@ impl ThreadBuilder<'_> {
                         }
                         None => DefaultStack::default(),
                     });
-            let mut coroutine = Some(Coroutine::with_stack(stack, || task()));
+            let mut coroutine = Some(Coroutine::with_stack(stack, task));
             ex.spawn(future::poll_fn(|cx| {
                 match Pin::new(coroutine.as_mut().expect("future poll after its finish")).poll(cx) {
                     task::Poll::Ready(()) => {
@@ -148,9 +148,9 @@ impl ThreadBuilder<'_> {
 
 pub struct Executor {
     unblocked_worker_count: CachePadded<AtomicUsize>,
-    task_sender: async_channel::Sender<SyncIntoCoroutine<()>>,
+    task_sender: async_channel::Sender<Box<TaskFn>>,
     deadlock_handler: Option<Box<SyncFn>>,
-    broadcast_senders: Vec<async_channel::Sender<SyncIntoCoroutine<()>>>,
+    broadcast_senders: Vec<async_channel::Sender<Box<TaskFn>>>,
     stack_size: Option<NonZero<usize>>,
     acquire_thread_handler: Option<Box<SyncFn>>,
     release_thread_handler: Option<Box<SyncFn>>,
@@ -215,7 +215,7 @@ impl Executor {
                 }
             }
 
-            struct CloseChannel<'a>(&'a async_channel::Receiver<SyncIntoCoroutine<()>>);
+            struct CloseChannel<'a>(&'a async_channel::Receiver<Box<TaskFn>>);
 
             impl Drop for CloseChannel<'_> {
                 fn drop(&mut self) {
@@ -241,14 +241,7 @@ impl Executor {
                 unreachable!()
             }
         };
-        self.task_sender
-            .try_send(if let Some(stack_size) = self.stack_size {
-                sync_into_coroutine_with_stack_size(stack_size.get(), f)
-                    .expect("unable to create a fresh coroutine for a task")
-            } else {
-                sync_into_coroutine(f)
-            })
-            .unwrap();
+        self.task_sender.try_send(Box::new(f)).unwrap();
         Task { result_receiver }
     }
 
@@ -272,14 +265,7 @@ impl Executor {
                     unreachable!()
                 }
             };
-            broadcast_task_sender
-                .try_send(if let Some(stack_size) = self.stack_size {
-                    sync_into_coroutine_with_stack_size(stack_size.get(), f)
-                        .expect("unable to create a fresh coroutine for a broadcast task")
-                } else {
-                    sync_into_coroutine(f)
-                })
-                .unwrap();
+            broadcast_task_sender.try_send(Box::new(f)).unwrap();
         }
         BroadcastTask { result_receiver }
     }
