@@ -58,8 +58,8 @@ impl ThreadBuilder<'_> {
             ptr::NonNull::new_unchecked(self.executor as *const _ as *mut _)
         }));
 
+        let stacks = &RefCell::new(Vec::with_capacity(8));
         let ex = unsend::executor::Executor::new();
-        let stacks = RefCell::new(Vec::with_capacity(8));
 
         pin_project! {
             struct WorkerFuture<'a, F> {
@@ -107,7 +107,7 @@ impl ThreadBuilder<'_> {
                         None => DefaultStack::default(),
                     });
             let mut coroutine = Some(Coroutine::with_stack(stack, task));
-            ex.spawn(future::poll_fn(|cx| {
+            ex.spawn(future::poll_fn(move |cx| {
                 match Pin::new(coroutine.as_mut().expect("future poll after its finish")).poll(cx) {
                     task::Poll::Ready(()) => {
                         stacks
