@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 async-channel = "2.3.1"
-colorless = { path = ".." }
+colorless = { path = "..", features = ["tlv"] }
 crossbeam-utils = "0.8.21"
 futures-lite = "2.6.0"
 pin-project-lite = "0.2.16"

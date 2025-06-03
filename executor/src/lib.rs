@@ -13,7 +13,7 @@ use crossbeam_utils::CachePadded;
 use futures_lite::{FutureExt, Stream};
 use pin_project_lite::pin_project;
 
-use colorless::{Coroutine, stack::DefaultStack};
+use colorless::{Coroutine, stack::DefaultStack, tlv::TLV};
 
 pub use futures_lite::{self, future::block_on};
 
@@ -234,8 +234,11 @@ impl Executor {
         F: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
     {
+        let og_tlv = UnsafeAssertSendTlv(TLV.get());
         let (result_sender, result_receiver) = async_channel::bounded(1);
         let f = move || {
+            let og_tlv = og_tlv;
+            TLV.with(|tlv| tlv.replace(og_tlv.0));
             let res = result_sender.try_send(f());
             if let Err(async_channel::TrySendError::Full(_)) = res {
                 unreachable!()
@@ -255,11 +258,14 @@ impl Executor {
         F: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
     {
+        let og_tlv = UnsafeAssertSendTlv(TLV.get());
         let (result_sender, result_receiver) = async_channel::bounded(self.num_threads());
         for (i, broadcast_task_sender) in self.broadcast_senders.iter().enumerate() {
             let result_sender = result_sender.clone();
             let f = g();
             let f = move || {
+                let og_tlv = og_tlv;
+                TLV.with(|tlv| tlv.replace(og_tlv.0));
                 let res = result_sender.try_send((i, f()));
                 if let Err(async_channel::TrySendError::Full(_)) = res {
                     unreachable!()
@@ -388,3 +394,7 @@ impl<R> Stream for BroadcastTask<R> {
         self.project().result_receiver.poll_next(cx)
     }
 }
+
+#[derive(Clone, Copy)]
+struct UnsafeAssertSendTlv(*const ());
+unsafe impl Send for UnsafeAssertSendTlv {}
